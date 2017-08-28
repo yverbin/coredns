@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"github.com/coredns/coredns/middleware"
+	"github.com/coredns/coredns/middleware/etcd/msg"
 	"github.com/coredns/coredns/middleware/pkg/cache"
-	"github.com/mholt/caddy/caddyhttp/proxy"
+	"github.com/coredns/coredns/request"
 
 	etcdc "github.com/coreos/etcd/client"
 	"github.com/coreos/etcd/clientv3"
+	"github.com/mholt/caddy/caddyhttp/proxy"
 )
 
 // Etcd3 is a middleware talks to an etcd cluster.
@@ -24,6 +26,10 @@ type Etcd3 struct {
 	Fallthrough bool
 
 	endpoints []string // Stored here as well, to aid in testing.
+}
+
+func (e *Etcd3) Records(state request.Request, exact bool) ([]msg.Service, error) {
+	return nil, nil
 }
 
 /*
