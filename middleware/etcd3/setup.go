@@ -6,13 +6,11 @@ import (
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/middleware"
 	"github.com/coredns/coredns/middleware/pkg/dnsutil"
-	"github.com/coredns/coredns/middleware/pkg/singleflight"
 	mwtls "github.com/coredns/coredns/middleware/pkg/tls"
 	"github.com/coredns/coredns/middleware/proxy"
 
-	etcdc "github.com/coreos/etcd/client"
+	"github.com/coreos/etcd/clientv3"
 	"github.com/mholt/caddy"
-	"golang.org/x/net/context"
 )
 
 func init() {
@@ -28,12 +26,14 @@ func setup(c *caddy.Controller) error {
 		return middleware.Error("etcd3", err)
 	}
 
-	if stubzones {
-		c.OnStartup(func() error {
-			e.UpdateStubZones()
-			return nil
-		})
-	}
+	/*
+		if stubzones {
+			c.OnStartup(func() error {
+				e.UpdateStubZones()
+				return nil
+			})
+		}
+	*/
 
 	dnsserver.GetConfig(c).AddMiddleware(func(next middleware.Handler) middleware.Handler {
 		e.Next = next
@@ -43,14 +43,10 @@ func setup(c *caddy.Controller) error {
 	return nil
 }
 
-func etcdParse(c *caddy.Controller) (*Etcd3, bool, error) {
+func etcd3Parse(c *caddy.Controller) (*Etcd3, bool, error) {
 	stub := make(map[string]proxy.Proxy)
-	etc := Etcd{
-		// Don't default to a proxy for lookups.
-		//		Proxy:      proxy.NewLookup([]string{"8.8.8.8:53", "8.8.4.4:53"}),
+	e3 := Etcd3{
 		PathPrefix: "skydns",
-		Ctx:        context.Background(),
-		Inflight:   &singleflight.Group{},
 		Stubmap:    &stub,
 	}
 	var (
@@ -60,13 +56,13 @@ func etcdParse(c *caddy.Controller) (*Etcd3, bool, error) {
 		stubzones = false
 	)
 	for c.Next() {
-		etc.Zones = c.RemainingArgs()
-		if len(etc.Zones) == 0 {
-			etc.Zones = make([]string, len(c.ServerBlockKeys))
-			copy(etc.Zones, c.ServerBlockKeys)
+		e3.Zones = c.RemainingArgs()
+		if len(e3.Zones) == 0 {
+			e3.Zones = make([]string, len(c.ServerBlockKeys))
+			copy(e3.Zones, c.ServerBlockKeys)
 		}
-		for i, str := range etc.Zones {
-			etc.Zones[i] = middleware.Host(str).Normalize()
+		for i, str := range e3.Zones {
+			e3.Zones[i] = middleware.Host(str).Normalize()
 		}
 
 		if c.NextBlock() {
@@ -75,70 +71,65 @@ func etcdParse(c *caddy.Controller) (*Etcd3, bool, error) {
 				case "stubzones":
 					stubzones = true
 				case "fallthrough":
-					etc.Fallthrough = true
-				case "debug":
-					etc.Debugging = true
+					e3.Fallthrough = true
 				case "path":
 					if !c.NextArg() {
-						return &Etcd{}, false, c.ArgErr()
+						return nil, false, c.ArgErr()
 					}
-					etc.PathPrefix = c.Val()
+					e3.PathPrefix = c.Val()
 				case "endpoint":
 					args := c.RemainingArgs()
 					if len(args) == 0 {
-						return &Etcd{}, false, c.ArgErr()
+						return nil, false, c.ArgErr()
 					}
 					endpoints = args
 				case "upstream":
 					args := c.RemainingArgs()
 					if len(args) == 0 {
-						return &Etcd{}, false, c.ArgErr()
+						return nil, false, c.ArgErr()
 					}
 					ups, err := dnsutil.ParseHostPortOrFile(args...)
 					if err != nil {
-						return &Etcd{}, false, err
+						return nil, false, err
 					}
-					etc.Proxy = proxy.NewLookup(ups)
+					e3.Proxy = proxy.NewLookup(ups)
 				case "tls": // cert key cacertfile
 					args := c.RemainingArgs()
 					tlsConfig, err = mwtls.NewTLSConfigFromArgs(args...)
 					if err != nil {
-						return &Etcd{}, false, err
+						return nil, false, err
 					}
 				default:
 					if c.Val() != "}" {
-						return &Etcd{}, false, c.Errf("unknown property '%s'", c.Val())
+						return nil, false, c.Errf("unknown property '%s'", c.Val())
 					}
-				}
-
-				if !c.Next() {
-					break
 				}
 			}
 
 		}
-		client, err := newEtcdClient(endpoints, tlsConfig)
+		client, err := newEtcd3KV(endpoints, tlsConfig)
 		if err != nil {
-			return &Etcd{}, false, err
+			return nil, false, err
 		}
-		etc.Client = client
-		etc.endpoints = endpoints
+		e3.kv = client
+		e3.endpoints = endpoints
 
-		return &etc, stubzones, nil
+		return &e3, stubzones, nil
 	}
-	return &Etcd{}, false, nil
+	return nil, false, nil
 }
 
-func newEtcdClient(endpoints []string, cc *tls.Config) (etcdc.KeysAPI, error) {
-	etcdCfg := etcdc.Config{
-		Endpoints: endpoints,
-		Transport: mwtls.NewHTTPSTransport(cc),
-	}
-	cli, err := etcdc.New(etcdCfg)
+func newEtcd3KV(endpoints []string, cc *tls.Config) (clientv3.KV, error) {
+	cli, err := clientv3.New(clientv3.Config{
+		DialTimeout: defaultTimeout,
+		Endpoints:   endpoints,
+		TLS:         cc,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return etcdc.NewKeysAPI(cli), nil
+	kv := clientv3.NewKV(cli)
+	return kv, nil
 }
 
 const defaultEndpoint = "http://localhost:2379"

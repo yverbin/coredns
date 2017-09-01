@@ -4,13 +4,13 @@
 a [message](https://github.com/corednscoredns/blob/master/middleware/etcd/msg/service.go#L26)
 like [SkyDNS](https://github.com/skynetservices/skydns).
 
-The etcd3 middleware makes extensive use of the proxy middleware to forward and query other servers
+The *etcd* middleware makes extensive use of the proxy middleware to forward and query other servers
 in the network.
 
 ## Syntax
 
 ~~~
-etcd3 [ZONES...]
+etcd [ZONES...]
 ~~~
 
 * **ZONES** zones etcd should be authoritative for.
@@ -19,7 +19,7 @@ The path will default to `/skydns` the local etcd proxy (http://localhost:2379).
 If no zones are specified the block's zone will be used as the zone.
 
 ~~~
-etcd3 [ZONES...] {
+etcd [ZONES...] {
     stubzones
     fallthrough
     path PATH
