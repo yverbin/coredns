@@ -26,14 +26,12 @@ func setup(c *caddy.Controller) error {
 		return middleware.Error("etcd3", err)
 	}
 
-	/*
-		if stubzones {
-			c.OnStartup(func() error {
-				e.UpdateStubZones()
-				return nil
-			})
-		}
-	*/
+	if stubzones {
+		c.OnStartup(func() error {
+			// e.UpdateStubZones()
+			return nil
+		})
+	}
 
 	dnsserver.GetConfig(c).AddMiddleware(func(next middleware.Handler) middleware.Handler {
 		e.Next = next
