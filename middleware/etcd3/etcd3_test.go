@@ -55,4 +55,7 @@ func TestEtcd3(t *testing.T) {
 		e.set(t, s.Key, s)
 		defer e.delete(t, s.Key)
 	}
+	path := msg.PathWithWildcard(svcs[0].Key, e.PathPrefix)
+	v, err := e.get(path)
+	println(v.Count)
 }
