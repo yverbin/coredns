@@ -25,6 +25,7 @@ const svcNameNamespaceIndex = "NameNamespace"
 const svcIPIndex = "ServiceIP"
 const epNameNamespaceIndex = "EndpointNameNamespace"
 const epIPIndex = "EndpointsIP"
+const nodeNameIndex = "NodeNameIndex"
 
 type dnsController interface {
 	ServiceList() []*api.Service
@@ -34,7 +35,7 @@ type dnsController interface {
 	EpIndex(string) []*api.Endpoints
 	EpIndexReverse(string) []*api.Endpoints
 	EndpointsList() []*api.Endpoints
-
+	NodeIndex(string) []*api.Node
 	GetNodeByName(string) (*api.Node, error)
 	GetNamespaceByName(string) (*api.Namespace, error)
 
@@ -48,14 +49,14 @@ type dnsControl struct {
 
 	selector *labels.Selector
 
-	svcController cache.Controller
-	podController cache.Controller
-	epController  cache.Controller
-
-	svcLister cache.Indexer
-	podLister cache.Indexer
-	epLister  cache.Indexer
-
+	svcController  cache.Controller
+	podController  cache.Controller
+	epController   cache.Controller
+	nodeController cache.Controller
+	svcLister      cache.Indexer
+	podLister      cache.Indexer
+	epLister       cache.Indexer
+	nodeLister     cache.Indexer
 	// stopLock is used to enforce only a single call to Stop is active.
 	// Needed because we allow stopping through an http endpoint and
 	// allowing concurrent stoppers leads to stack traces.
@@ -109,6 +110,16 @@ func newdnsController(kubeClient *kubernetes.Clientset, opts dnsControlOpts) *dn
 		opts.resyncPeriod,
 		cache.ResourceEventHandlerFuncs{},
 		cache.Indexers{epNameNamespaceIndex: epNameNamespaceIndexFunc, epIPIndex: epIPIndexFunc})
+
+	dns.nodeLister, dns.nodeController = cache.NewIndexerInformer(
+		&cache.ListWatch{
+			ListFunc:  nodeListFunc(dns.client, dns.selector),
+			WatchFunc: nodeWatchFunc(dns.client, dns.selector),
+		},
+		&api.Node{},
+		opts.resyncPeriod,
+		cache.ResourceEventHandlerFuncs{},
+		cache.Indexers{nodeNameIndex: nodeNameIndexFunc})
 
 	return &dns
 }
@@ -257,6 +268,7 @@ func (dns *dnsControl) Stop() error {
 func (dns *dnsControl) Run() {
 	go dns.svcController.Run(dns.stopCh)
 	go dns.epController.Run(dns.stopCh)
+	go dns.nodeController.Run(dns.stopCh)
 	if dns.podController != nil {
 		go dns.podController.Run(dns.stopCh)
 	}
@@ -267,11 +279,12 @@ func (dns *dnsControl) Run() {
 func (dns *dnsControl) HasSynced() bool {
 	a := dns.svcController.HasSynced()
 	b := dns.epController.HasSynced()
-	c := true
+	c := dns.nodeController.HasSynced()
+	d := true
 	if dns.podController != nil {
-		c = dns.podController.HasSynced()
+		d = dns.podController.HasSynced()
 	}
-	return a && b && c
+	return a && b && c && d
 }
 
 func (dns *dnsControl) ServiceList() (svcs []*api.Service) {

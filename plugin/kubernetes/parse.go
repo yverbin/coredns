@@ -54,7 +54,7 @@ func parseRequest(state request.Request) (r recordRequest, err error) {
 		return r, nil
 	}
 	r.podOrSvc = segs[last]
-	if r.podOrSvc != Pod && r.podOrSvc != Svc {
+	if r.podOrSvc != Nodes && r.podOrSvc != Ingress && r.podOrSvc != Pod && r.podOrSvc != Svc {
 		return r, errInvalidRequest
 	}
 	last--
@@ -62,6 +62,10 @@ func parseRequest(state request.Request) (r recordRequest, err error) {
 		return r, nil
 	}
 
+	if r.podOrSvc == Nodes {
+		r.endpoint = segs[last]
+		return r, nil
+	}
 	r.namespace = segs[last]
 	last--
 	if last < 0 {

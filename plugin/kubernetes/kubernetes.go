@@ -81,7 +81,11 @@ var (
 
 // Services implements the ServiceBackend interface.
 func (k *Kubernetes) Services(state request.Request, exact bool, opt plugin.Options) (svcs []msg.Service, err error) {
-
+	//TODO state.Zone on sub-sequent requests doesnt contain Zone field
+	// It happens, when client tries to resolve cname record, that points to this server
+	if state.Zone == "" {
+		state.Zone = k.primaryZone()
+	}
 	// We're looking again at types, which we've already done in ServeDNS, but there are some types k8s just can't answer.
 	switch state.QType() {
 
@@ -264,6 +268,16 @@ func (k *Kubernetes) Records(state request.Request, exact bool) ([]msg.Service, 
 	r, e := parseRequest(state)
 	if e != nil {
 		return nil, e
+	}
+
+	if r.podOrSvc == Nodes {
+		nodes, err := k.findNodes(r, state.Zone)
+		return nodes, err
+	}
+
+	if r.podOrSvc == Ingress {
+		ingress, err := k.findIngress(r, state.Zone)
+		return ingress, err
 	}
 
 	if !wildcard(r.namespace) && !k.namespaceExposed(r.namespace) {
