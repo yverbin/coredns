@@ -13,14 +13,12 @@ func (k *Kubernetes) findNodes(r recordRequest, zone string) (ret []msg.Service,
 	nodeList := k.APIConn.NodeIndex(r.endpoint)
 	for _, node := range nodeList {
 		if node.Name == r.endpoint {
-			for _, nodeAddr := range node.Status.Addresses {
-				if string(nodeAddr.Type) == "InternalIP" {
-					nodeA := msg.Service{Host: nodeAddr.Address, TTL: k.ttl}
-					nodeA.Key = strings.Join([]string{zonePath, Nodes, node.Name}, "/")
-					ret = append(ret, nodeA)
-					err = nil
-					return
-				}
+			if ip, ok := getNodeIP(node); ok {
+				nodeA := msg.Service{Host: ip, TTL: k.ttl}
+				nodeA.Key = strings.Join([]string{zonePath, Nodes, node.Name}, "/")
+				ret = append(ret, nodeA)
+				err = nil
+				return
 			}
 		}
 	}
@@ -75,12 +73,20 @@ func (k *Kubernetes) findIngress(r recordRequest, zone string) (nodes []msg.Serv
 
 					for _, node := range nodeList {
 						if node.Name == r.endpoint {
-							n := msg.Service{ Key: strings.Join([]string{zonePath, Ingress, svc.Namespace, svc.Name, node.Name}, "/"),
+							n := msg.Service{Key: strings.Join([]string{zonePath, Ingress, svc.Namespace, svc.Name, node.Name}, "/"),
 								Host: strings.Join([]string{node.Name, svc.Annotations["exportNodesDomain"]}, "."),
 								TTL:  k.ttl}
 
 							nodes = append(nodes, n)
 							err = nil
+							//returns A-record  if exportNodesDomain equal nodes primary zone at once
+							if strings.Join(strings.Split(svc.Annotations["exportNodesDomain"], "."), "/") == strings.Join([]string{zone, Nodes}, "/") {
+								if ip,ok:=getNodeIP(node);ok {
+									nodeA := msg.Service{Host:ip, TTL: k.ttl}
+									nodeA.Key = strings.Join([]string{zonePath, Nodes, node.Name}, "/")
+									nodes = append(nodes, n)
+								}
+							}
 							return nodes, err
 						}
 					}
@@ -94,9 +100,19 @@ func (k *Kubernetes) findIngress(r recordRequest, zone string) (nodes []msg.Serv
 
 }
 
+func getNodeIP(node *api.Node) (ip string, ok bool) {
+	for _, nodeAddr := range node.Status.Addresses {
+		if string(nodeAddr.Type) == "InternalIP" {
+			ip = nodeAddr.Address
+			ok = true
+		}
+	}
+	return
+}
+
 const (
-	// Nodes is the DNS schema for kubernetes services
+	// Nodes is the DNS schema for cluster nodes
 	Nodes = "nodes"
-	// Ingress is the DNS schema for kubernetes pods
+	// Ingress is the DNS schema for kubernetes ingress services
 	Ingress = "ingress"
 )
