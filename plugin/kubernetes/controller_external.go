@@ -3,7 +3,6 @@ package kubernetes
 import (
 	"errors"
 
-
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -64,3 +63,14 @@ func (dns *dnsControl) NodeIndex(idx string) (nodes []*api.Node) {
 	return nodes
 }
 
+func (dns *dnsControl) NodesList() (nodes []*api.Node) {
+	os := dns.nodeLister.List()
+	for _, o := range os {
+		s, ok := o.(*api.Node)
+		if !ok {
+			continue
+		}
+		nodes = append(nodes, s)
+	}
+	return nodes
+}

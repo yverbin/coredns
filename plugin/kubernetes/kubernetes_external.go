@@ -31,48 +31,58 @@ func (k *Kubernetes) findIngress(r recordRequest, zone string) (nodes []msg.Serv
 	if wildcard(r.service) || wildcard(r.namespace) {
 		return
 	}
-	if r.endpoint == "" {
+
+	idx := r.service + "." + r.namespace
+	serviceList := k.APIConn.SvcIndex(idx)
+
+	if serviceList == nil || len(serviceList) == 0 {
+		return
+	}
+	var (
+		nodeList []*api.Node
+		svc      *api.Service
+	)
+	svc = serviceList[0]
+	if !(match(r.namespace, svc.Namespace) && match(r.service, svc.Name)) {
 		return
 	}
 
-	nodeList := k.APIConn.NodeIndex(r.endpoint)
+	switch svc.Annotations["exportNodesMode"] {
+	case ExportModeCName:
+		if r.endpoint == "" || svc.Annotations["exportNodesDomain"] == "" {
+			return
+		}
+		nodeList = k.APIConn.NodeIndex(r.endpoint)
+	case ExportModeHost:
+		if r.endpoint != "" {
+			return
+		}
+		nodeList = k.APIConn.NodesList()
+	default:
+		return
+	}
+
 	if nodeList == nil || len(nodeList) == 0 {
 		return
 	}
+	endpoints := k.APIConn.EpIndex(idx)
 
-	var (
-		endpointsListFunc func() []*api.Endpoints
-		endpointsList     []*api.Endpoints
-		serviceList       []*api.Service
-	)
-	idx := r.service + "." + r.namespace
-	serviceList = k.APIConn.SvcIndex(idx)
-	endpointsListFunc = func() []*api.Endpoints { return k.APIConn.EpIndex(idx) }
-
-	for _, svc := range serviceList {
-		if !(match(r.namespace, svc.Namespace) && match(r.service, svc.Name)) {
+	for _, ep := range endpoints {
+		if ep.ObjectMeta.Name != svc.Name || ep.ObjectMeta.Namespace != svc.Namespace {
 			continue
 		}
+		for _, eps := range ep.Subsets {
+			for _, addr := range eps.Addresses {
+				nodeList := k.APIConn.NodeIndex(*addr.NodeName)
+				if nodeList == nil || len(nodeList) == 0 {
+					continue
+				}
 
-		if _, ok := svc.Annotations["exportNodesDomain"]; !ok {
-			continue
-		}
-		if endpointsList == nil {
-			endpointsList = endpointsListFunc()
-		}
-		for _, ep := range endpointsList {
-			if ep.ObjectMeta.Name != svc.Name || ep.ObjectMeta.Namespace != svc.Namespace {
-				continue
-			}
-			for _, eps := range ep.Subsets {
-				for _, addr := range eps.Addresses {
-					nodeList := k.APIConn.NodeIndex(*addr.NodeName)
-					if nodeList == nil || len(nodeList) == 0 {
-						continue
-					}
-
-					for _, node := range nodeList {
+				for _, node := range nodeList {
+					switch svc.Annotations["exportNodesMode"] {
+					case ExportModeCName:
 						if node.Name == r.endpoint {
+							//export as cname
 							n := msg.Service{Key: strings.Join([]string{zonePath, Ingress, svc.Namespace, svc.Name, node.Name}, "/"),
 								Host: strings.Join([]string{node.Name, svc.Annotations["exportNodesDomain"]}, "."),
 								TTL:  k.ttl}
@@ -81,21 +91,34 @@ func (k *Kubernetes) findIngress(r recordRequest, zone string) (nodes []msg.Serv
 							err = nil
 							//returns A-record  if exportNodesDomain equal nodes primary zone at once
 							if strings.Join(strings.Split(svc.Annotations["exportNodesDomain"], "."), "/") == strings.Join([]string{zone, Nodes}, "/") {
-								if ip,ok:=getNodeIP(node);ok {
-									nodeA := msg.Service{Host:ip, TTL: k.ttl}
+								if ip, ok := getNodeIP(node); ok {
+									nodeA := msg.Service{Host: ip, TTL: k.ttl}
 									nodeA.Key = strings.Join([]string{zonePath, Nodes, node.Name}, "/")
 									nodes = append(nodes, n)
 								}
 							}
 							return nodes, err
 						}
-					}
+					case ExportModeHost:
+						if node.Name == *addr.NodeName {
+							if ip, ok := getNodeIP(node); ok {
+								//export as A records
+								n := msg.Service{Key: strings.Join([]string{zonePath, Ingress, svc.Namespace, svc.Name}, "/"),
+									Host: ip,
+									TTL:  k.ttl}
+								err = nil
+								nodes = append(nodes, n)
+							}
 
+						}
+
+					}
 				}
 
 			}
 		}
 	}
+
 	return
 
 }
@@ -115,4 +138,8 @@ const (
 	Nodes = "nodes"
 	// Ingress is the DNS schema for kubernetes ingress services
 	Ingress = "ingress"
+	//ExportModeHost export nodes as A records
+	ExportModeHost = "host"
+	//ExportModeCName export nodes as Cname records
+	ExportModeCName = "cname"
 )

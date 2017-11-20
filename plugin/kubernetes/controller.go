@@ -38,7 +38,7 @@ type dnsController interface {
 	NodeIndex(string) []*api.Node
 	GetNodeByName(string) (*api.Node, error)
 	GetNamespaceByName(string) (*api.Namespace, error)
-
+	NodesList() []*api.Node
 	Run()
 	HasSynced() bool
 	Stop() error
